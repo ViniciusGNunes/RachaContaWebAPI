@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{B5B81295-2F21-4751-9830-FA360F39F835}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RachaConta.Api", "src\RachaConta.Api\RachaConta.Api.csproj", "{A6A409A8-AE15-44D6-86D4-62FC7BA8DFDC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{F8EC6F00-E64F-4DEA-B585-DF89BECD6925}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RachaConta.Tests", "tests\RachaConta.Tests\RachaConta.Tests.csproj", "{F33686BE-9367-4D11-B426-4F3EBB139C47}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A6A409A8-AE15-44D6-86D4-62FC7BA8DFDC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A6A409A8-AE15-44D6-86D4-62FC7BA8DFDC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A6A409A8-AE15-44D6-86D4-62FC7BA8DFDC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A6A409A8-AE15-44D6-86D4-62FC7BA8DFDC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F33686BE-9367-4D11-B426-4F3EBB139C47}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F33686BE-9367-4D11-B426-4F3EBB139C47}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F33686BE-9367-4D11-B426-4F3EBB139C47}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F33686BE-9367-4D11-B426-4F3EBB139C47}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A6A409A8-AE15-44D6-86D4-62FC7BA8DFDC} = {B5B81295-2F21-4751-9830-FA360F39F835}
+		{F33686BE-9367-4D11-B426-4F3EBB139C47} = {F8EC6F00-E64F-4DEA-B585-DF89BECD6925}
+	EndGlobalSection
+EndGlobal

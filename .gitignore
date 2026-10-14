@@ -1,0 +1,13 @@
+﻿# .NET
+bin/
+obj/
+.vs/
+*.user
+*.db
+*.db-shm
+*.db-wal
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
