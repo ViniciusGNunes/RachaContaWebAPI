@@ -15,11 +15,13 @@ namespace RachaConta.Api.Migrations
                 name: "Groups",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 80, nullable: false),
-                    Description = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
-                    Currency = table.Column<string>(type: "TEXT", maxLength: 3, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: false),
+                    Description = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    Currency = table.Column<string>(type: "character varying(3)", maxLength: 3, nullable: false),
+                    AccessToken = table.Column<string>(type: "text", nullable: false),
+                    AdminToken = table.Column<string>(type: "text", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -30,17 +32,17 @@ namespace RachaConta.Api.Migrations
                 name: "Splits",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Slug = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
-                    AdminToken = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    Title = table.Column<string>(type: "TEXT", maxLength: 80, nullable: false),
-                    TotalAmount = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false),
-                    PixKey = table.Column<string>(type: "TEXT", maxLength: 77, nullable: false),
-                    PixKeyType = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    ReceiverName = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    ReceiverCity = table.Column<string>(type: "TEXT", maxLength: 15, nullable: false),
-                    SplitMode = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Slug = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
+                    AdminToken = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    Title = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: false),
+                    TotalAmount = table.Column<decimal>(type: "numeric(18,2)", precision: 18, scale: 2, nullable: false),
+                    PixKey = table.Column<string>(type: "character varying(77)", maxLength: 77, nullable: false),
+                    PixKeyType = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    ReceiverName = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    ReceiverCity = table.Column<string>(type: "character varying(15)", maxLength: 15, nullable: false),
+                    SplitMode = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -51,12 +53,12 @@ namespace RachaConta.Api.Migrations
                 name: "Members",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    GroupId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 60, nullable: false),
-                    PixKey = table.Column<string>(type: "TEXT", maxLength: 77, nullable: true),
-                    PixKeyType = table.Column<string>(type: "TEXT", maxLength: 32, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: false),
+                    PixKey = table.Column<string>(type: "character varying(77)", maxLength: 77, nullable: true),
+                    PixKeyType = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -73,14 +75,16 @@ namespace RachaConta.Api.Migrations
                 name: "SplitParticipants",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    SplitId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Position = table.Column<int>(type: "INTEGER", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 60, nullable: false),
-                    Amount = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false),
-                    IsOwner = table.Column<bool>(type: "INTEGER", nullable: false),
-                    Paid = table.Column<bool>(type: "INTEGER", nullable: false),
-                    PaidAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    SplitId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Position = table.Column<int>(type: "integer", nullable: false),
+                    Name = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: false),
+                    Amount = table.Column<decimal>(type: "numeric(18,2)", precision: 18, scale: 2, nullable: false),
+                    IsOwner = table.Column<bool>(type: "boolean", nullable: false),
+                    Paid = table.Column<bool>(type: "boolean", nullable: false),
+                    PaidAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PaymentPending = table.Column<bool>(type: "boolean", nullable: false),
+                    ClaimedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -97,17 +101,17 @@ namespace RachaConta.Api.Migrations
                 name: "Expenses",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    GroupId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Description = table.Column<string>(type: "TEXT", maxLength: 120, nullable: false),
-                    Amount = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false),
-                    Date = table.Column<DateOnly>(type: "TEXT", nullable: false),
-                    Category = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    PaymentMethod = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    PaidByMemberId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ShareMode = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    Notes = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Description = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    Amount = table.Column<decimal>(type: "numeric(18,2)", precision: 18, scale: 2, nullable: false),
+                    Date = table.Column<DateOnly>(type: "date", nullable: false),
+                    Category = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    PaymentMethod = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    PaidByMemberId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ShareMode = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    Notes = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -130,15 +134,15 @@ namespace RachaConta.Api.Migrations
                 name: "Settlements",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    GroupId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    FromMemberId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ToMemberId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Amount = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false),
-                    Date = table.Column<DateOnly>(type: "TEXT", nullable: false),
-                    PaymentMethod = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    Notes = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    FromMemberId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ToMemberId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Amount = table.Column<decimal>(type: "numeric(18,2)", precision: 18, scale: 2, nullable: false),
+                    Date = table.Column<DateOnly>(type: "date", nullable: false),
+                    PaymentMethod = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    Notes = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -167,12 +171,12 @@ namespace RachaConta.Api.Migrations
                 name: "ExpenseShares",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ExpenseId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Position = table.Column<int>(type: "INTEGER", nullable: false),
-                    MemberId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Amount = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false),
-                    Percentage = table.Column<decimal>(type: "TEXT", precision: 9, scale: 4, nullable: true)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ExpenseId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Position = table.Column<int>(type: "integer", nullable: false),
+                    MemberId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Amount = table.Column<decimal>(type: "numeric(18,2)", precision: 18, scale: 2, nullable: false),
+                    Percentage = table.Column<decimal>(type: "numeric(9,4)", precision: 9, scale: 4, nullable: true)
                 },
                 constraints: table =>
                 {

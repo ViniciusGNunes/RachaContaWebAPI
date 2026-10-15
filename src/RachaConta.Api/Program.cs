@@ -9,8 +9,9 @@ builder.Services.AddControllers(o => o.Filters.Add<AppExceptionFilter>()).AddJso
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<AppExceptionHandler>();
 
-var connectionString = builder.Configuration.GetConnectionString("Default") ?? "Data Source=rachaconta.db";
-var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
+var connectionString = builder.Configuration.GetConnectionString("Default")
+    ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
+var provider = builder.Configuration["Database:Provider"] ?? "Postgres";
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     switch (provider.ToLowerInvariant())
@@ -20,7 +21,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
             break;
         case "postgres":
         case "postgresql":
-            // Note: existing migrations target SQLite; generate a Postgres migration set before switching.
             options.UseNpgsql(connectionString);
             break;
         default:
@@ -39,9 +39,8 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(allowedOrigi
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
     scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
 }
 
