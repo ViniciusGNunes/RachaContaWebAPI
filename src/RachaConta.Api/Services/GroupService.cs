@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RachaConta.Api.Contracts;
+using RachaConta.Api.Controllers;
 using RachaConta.Api.Data;
 using RachaConta.Api.Domain;
 
@@ -38,11 +39,19 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
 
         var authorized = new List<(Guid Id, bool IsAdmin)>();
         var byId = requested.ToDictionary(i => i.Id!.Value, i => i.Token!);
+        var hashes = byId.Values.Select(Tokens.Hash).ToList();
+        var memberHits = await db.Members.AsNoTracking()
+            .Where(m => ids.Contains(m.GroupId) && m.TokenHash != null && hashes.Contains(m.TokenHash))
+            .Select(m => new { m.GroupId, m.TokenHash, m.IsAdmin })
+            .ToListAsync(ct);
         foreach (var g in groups)
         {
             var token = byId[g.Id];
+            var tokenHash = Tokens.Hash(token);
             var isAdmin = Tokens.FixedTimeEquals(token, g.AdminToken);
-            if (isAdmin || Tokens.FixedTimeEquals(token, g.AccessToken)) authorized.Add((g.Id, isAdmin));
+            var memberHit = memberHits.FirstOrDefault(h => h.GroupId == g.Id && h.TokenHash == tokenHash);
+            if (isAdmin || memberHit is not null || Tokens.FixedTimeEquals(token, g.AccessToken))
+                authorized.Add((g.Id, isAdmin || memberHit is { IsAdmin: true }));
         }
         if (authorized.Count == 0) return [];
 
@@ -63,7 +72,84 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
             .ToList();
     }
 
-    public async Task<GroupDto> GetAsync(Guid id, CancellationToken ct) => ToDto(await LoadAsync(id, ct));
+    public async Task<GroupDto> GetAsync(Guid id, GroupActor actor, CancellationToken ct)
+    {
+        var group = await LoadAsync(id, ct);
+        // The invite link is only for people who already hold it; members and admins may pass it on.
+        return ToDto(group, actor) with
+        {
+            AccessToken = actor.IsInvite ? null : group.AccessToken,
+            AdminToken = actor.ViaAdminToken ? group.AdminToken : null,
+            YourMemberId = actor.MemberId,
+            IsAdmin = actor.IsAdmin,
+        };
+    }
+
+    /// <summary>Picks an identity: claim a free member, or join as a new one. Returns the personal token once.</summary>
+    public async Task<ClaimResultDto> ClaimAsync(Guid groupId, ClaimRequest req, GroupActor actor, CancellationToken ct)
+    {
+        var group = await LoadAsync(groupId, ct);
+        var now = clock.GetUtcNow().UtcDateTime;
+        Member member;
+
+        if (req.MemberId is { } memberId)
+        {
+            member = group.Members.FirstOrDefault(m => m.Id == memberId)
+                     ?? throw new NotFoundException($"Member '{memberId}' not found in this group.");
+            if (member.TokenHash is not null) throw new ConflictException("This member was already claimed by someone.");
+        }
+        else
+        {
+            var errors = new ValidationErrors();
+            var created = ValidateMember(new MemberRequest(req.NewName, null, null), "", errors);
+            if (created is not null && group.Members.Any(m => string.Equals(m.Name, created.Name, StringComparison.OrdinalIgnoreCase)))
+                errors.Add("newName", $"A member named '{created.Name}' already exists in this group.");
+            errors.ThrowIfAny();
+            member = created!;
+            member.GroupId = groupId;
+            member.CreatedAt = now;
+            db.Members.Add(member);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var token = Tokens.NewAdminToken();
+        var hash = Tokens.Hash(token);
+        var isAdmin = actor.ViaAdminToken;
+        // Conditional update keeps two people from claiming the same member at once.
+        var rows = await db.Members
+            .Where(m => m.Id == member.Id && m.GroupId == groupId && m.TokenHash == null)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(m => m.TokenHash, hash)
+                .SetProperty(m => m.ClaimedAt, now)
+                .SetProperty(m => m.IsAdmin, isAdmin), ct);
+        if (rows == 0) throw new ConflictException("This member was already claimed by someone.");
+
+        member.TokenHash = hash;
+        member.ClaimedAt = now;
+        member.IsAdmin = isAdmin;
+        return new ClaimResultDto(token, ToDto(member));
+    }
+
+    /// <summary>Admin frees a member (lost device); the next person to claim gets a fresh token.</summary>
+    public async Task ResetClaimAsync(Guid groupId, Guid memberId, CancellationToken ct)
+    {
+        var rows = await db.Members
+            .Where(m => m.Id == memberId && m.GroupId == groupId)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(m => m.TokenHash, (string?)null)
+                .SetProperty(m => m.ClaimedAt, (DateTime?)null)
+                .SetProperty(m => m.IsAdmin, false), ct);
+        if (rows == 0) throw new NotFoundException($"Member '{memberId}' not found in this group.");
+    }
+
+    public async Task<InviteDto> RotateInviteAsync(Guid groupId, CancellationToken ct)
+    {
+        var token = Tokens.NewAdminToken();
+        var rows = await db.Groups.Where(g => g.Id == groupId)
+            .ExecuteUpdateAsync(u => u.SetProperty(g => g.AccessToken, token), ct);
+        if (rows == 0) throw new NotFoundException($"Group '{groupId}' not found.");
+        return new InviteDto(token);
+    }
 
     public async Task<GroupDto> CreateAsync(CreateGroupRequest req, CancellationToken ct)
     {
@@ -85,7 +171,7 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
             if (m is null) continue;
             if (!seen.Add(m.Name)) { errors.Add($"members[{i}].name", $"Duplicate member name '{m.Name}'."); continue; }
             m.GroupId = group.Id;
-            m.CreatedAt = now.AddTicks(i); // keeps creation order stable
+            m.CreatedAt = now.AddMilliseconds(i); // keeps creation order stable (Postgres keeps only microseconds)
             group.Members.Add(m);
         }
         errors.ThrowIfAny();
@@ -114,11 +200,13 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         var group = await db.Groups
             .Include(g => g.Members)
             .Include(g => g.Expenses).ThenInclude(e => e.Shares)
+            .Include(g => g.Expenses).ThenInclude(e => e.Confirmations)
             .Include(g => g.Settlements)
             .AsSplitQuery()
             .FirstOrDefaultAsync(g => g.Id == id, ct)
             ?? throw new NotFoundException($"Group '{id}' not found.");
 
+        db.ExpenseConfirmations.RemoveRange(group.Expenses.SelectMany(e => e.Confirmations));
         db.ExpenseShares.RemoveRange(group.Expenses.SelectMany(e => e.Shares));
         db.Expenses.RemoveRange(group.Expenses);
         db.Settlements.RemoveRange(group.Settlements);
@@ -144,8 +232,10 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         return ToDto(member);
     }
 
-    public async Task<MemberDto> UpdateMemberAsync(Guid groupId, Guid memberId, MemberRequest req, CancellationToken ct)
+    public async Task<MemberDto> UpdateMemberAsync(Guid groupId, Guid memberId, MemberRequest req, GroupActor actor, CancellationToken ct)
     {
+        if (!actor.IsAdmin && actor.MemberId != memberId)
+            throw new ForbiddenException("You can only edit your own data.");
         var group = await LoadAsync(groupId, ct);
         var member = group.Members.FirstOrDefault(m => m.Id == memberId)
                      ?? throw new NotFoundException($"Member '{memberId}' not found in this group.");
@@ -180,6 +270,7 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         if (referenced)
             throw new ConflictException("This member is referenced by expenses or settlements and cannot be removed.");
 
+        await db.ExpenseConfirmations.Where(c => c.MemberId == memberId).ExecuteDeleteAsync(ct);
         db.Members.Remove(member);
         await db.SaveChangesAsync(ct);
     }
@@ -267,8 +358,10 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         return ok ? new Member { Id = Guid.NewGuid(), Name = name, PixKey = pixKey, PixKeyType = pixKeyType } : null;
     }
 
-    private static GroupDto ToDto(Group g) => new(g.Id, g.Name, g.Description, g.Currency, g.CreatedAt,
-        g.Members.OrderBy(m => m.CreatedAt).Select(ToDto).ToList());
+    private static GroupDto ToDto(Group g, GroupActor? actor = null) => new(g.Id, g.Name, g.Description, g.Currency, g.CreatedAt,
+        g.Members.OrderBy(m => m.CreatedAt).Select(m => ToDto(m, hidePix: actor?.IsInvite == true)).ToList());
 
-    public static MemberDto ToDto(Member m) => new(m.Id, m.Name, m.PixKey, m.PixKeyType);
+    /// <summary>Pix keys are private to identified members: the bare invite link cannot see them.</summary>
+    public static MemberDto ToDto(Member m, bool hidePix = false) =>
+        new(m.Id, m.Name, hidePix ? null : m.PixKey, hidePix ? null : m.PixKeyType, m.TokenHash is not null, m.IsAdmin);
 }

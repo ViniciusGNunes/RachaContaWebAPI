@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<ExpenseShare> ExpenseShares => Set<ExpenseShare>();
     public DbSet<Settlement> Settlements => Set<Settlement>();
+    public DbSet<ExpenseConfirmation> ExpenseConfirmations => Set<ExpenseConfirmation>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -57,6 +58,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(x => x.Name).HasMaxLength(60).IsRequired();
             e.Property(x => x.PixKey).HasMaxLength(77);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.HasIndex(x => x.TokenHash);
         });
 
         b.Entity<Expense>(e =>
@@ -65,7 +68,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Notes).HasMaxLength(500);
             e.HasOne(x => x.PaidBy).WithMany().HasForeignKey(x => x.PaidByMemberId).OnDelete(DeleteBehavior.Restrict);
             e.HasMany(x => x.Shares).WithOne().HasForeignKey(s => s.ExpenseId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Confirmations).WithOne().HasForeignKey(c => c.ExpenseId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.GroupId, x.Date });
+        });
+
+        b.Entity<ExpenseConfirmation>(e =>
+        {
+            e.Property(x => x.Comment).HasMaxLength(200);
+            e.HasIndex(x => new { x.ExpenseId, x.MemberId }).IsUnique();
         });
 
         b.Entity<ExpenseShare>(e =>

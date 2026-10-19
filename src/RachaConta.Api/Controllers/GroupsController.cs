@@ -8,6 +8,9 @@ namespace RachaConta.Api.Controllers;
 [Route("api/groups")]
 public sealed class GroupsController(GroupService groups, ExpenseService expenses) : ControllerBase
 {
+    /// <summary>Who is calling; set by <see cref="GroupAccessAttribute"/> on every group endpoint.</summary>
+    private GroupActor Actor => (GroupActor)HttpContext.Items[GroupAccessAttribute.ItemKey]!;
+
     // ---------- Groups ----------
 
     [HttpPost("lookup")]
@@ -23,7 +26,7 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
 
     [HttpGet("{id:guid}")]
     [GroupAccess]
-    public Task<GroupDto> Get(Guid id, CancellationToken ct) => groups.GetAsync(id, ct);
+    public Task<GroupDto> Get(Guid id, CancellationToken ct) => groups.GetAsync(id, Actor, ct);
 
     [HttpPut("{id:guid}")]
     [GroupAccess(RequireAdmin = true)]
@@ -38,10 +41,21 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
         return NoContent();
     }
 
+    /// <summary>Replaces the invite token; the old invite link stops working.</summary>
+    [HttpPost("{id:guid}/rotate-invite")]
+    [GroupAccess(RequireAdmin = true)]
+    public Task<InviteDto> RotateInvite(Guid id, CancellationToken ct) => groups.RotateInviteAsync(id, ct);
+
+    /// <summary>Pick who you are in the group; returns your personal token once.</summary>
+    [HttpPost("{id:guid}/claim")]
+    [GroupAccess(ClaimOnly = true)]
+    public Task<ClaimResultDto> Claim(Guid id, [FromBody] ClaimRequest req, CancellationToken ct) =>
+        groups.ClaimAsync(id, req, Actor, ct);
+
     // ---------- Members ----------
 
     [HttpPost("{id:guid}/members")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public async Task<ActionResult<MemberDto>> AddMember(Guid id, [FromBody] MemberRequest req, CancellationToken ct)
     {
         var dto = await groups.AddMemberAsync(id, req, ct);
@@ -49,9 +63,9 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
     }
 
     [HttpPut("{id:guid}/members/{memberId:guid}")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public Task<MemberDto> UpdateMember(Guid id, Guid memberId, [FromBody] MemberRequest req, CancellationToken ct) =>
-        groups.UpdateMemberAsync(id, memberId, req, ct);
+        groups.UpdateMemberAsync(id, memberId, req, Actor, ct);
 
     [HttpDelete("{id:guid}/members/{memberId:guid}")]
     [GroupAccess(RequireAdmin = true)]
@@ -61,8 +75,17 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
         return NoContent();
     }
 
+    /// <summary>Frees a member whose person lost their device, so it can be claimed again.</summary>
+    [HttpPost("{id:guid}/members/{memberId:guid}/reset-claim")]
+    [GroupAccess(RequireAdmin = true)]
+    public async Task<IActionResult> ResetClaim(Guid id, Guid memberId, CancellationToken ct)
+    {
+        await groups.ResetClaimAsync(id, memberId, ct);
+        return NoContent();
+    }
+
     [HttpGet("{id:guid}/members/{memberId:guid}/pix")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public Task<MemberPixDto> MemberPix(Guid id, Guid memberId, [FromQuery] decimal? amount, CancellationToken ct) =>
         groups.GetMemberPixAsync(id, memberId, amount, ct);
 
@@ -74,10 +97,10 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
         expenses.ListAsync(id, filter, ct);
 
     [HttpPost("{id:guid}/expenses")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public async Task<ActionResult<ExpenseDto>> CreateExpense(Guid id, [FromBody] ExpenseRequest req, CancellationToken ct)
     {
-        var dto = await expenses.CreateAsync(id, req, ct);
+        var dto = await expenses.CreateAsync(id, req, Actor, ct);
         return CreatedAtAction(nameof(GetExpense), new { id, expenseId = dto.Id }, dto);
     }
 
@@ -87,17 +110,23 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
         expenses.GetAsync(id, expenseId, ct);
 
     [HttpPut("{id:guid}/expenses/{expenseId:guid}")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public Task<ExpenseDto> UpdateExpense(Guid id, Guid expenseId, [FromBody] ExpenseRequest req, CancellationToken ct) =>
-        expenses.UpdateAsync(id, expenseId, req, ct);
+        expenses.UpdateAsync(id, expenseId, req, Actor, ct);
 
     [HttpDelete("{id:guid}/expenses/{expenseId:guid}")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public async Task<IActionResult> DeleteExpense(Guid id, Guid expenseId, CancellationToken ct)
     {
-        await expenses.DeleteAsync(id, expenseId, ct);
+        await expenses.DeleteAsync(id, expenseId, Actor, ct);
         return NoContent();
     }
+
+    /// <summary>A person this expense was split with confirms or contests it.</summary>
+    [HttpPost("{id:guid}/expenses/{expenseId:guid}/confirmation")]
+    [GroupAccess(RequireMember = true)]
+    public Task<ExpenseDto> ConfirmExpense(Guid id, Guid expenseId, [FromBody] ConfirmationRequest req, CancellationToken ct) =>
+        expenses.ConfirmAsync(id, expenseId, req, Actor, ct);
 
     // ---------- Settlements ----------
 
@@ -107,18 +136,24 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
         expenses.ListSettlementsAsync(id, ct);
 
     [HttpPost("{id:guid}/settlements")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public async Task<ActionResult<SettlementDto>> CreateSettlement(Guid id, [FromBody] CreateSettlementRequest req, CancellationToken ct)
     {
-        var dto = await expenses.CreateSettlementAsync(id, req, ct);
+        var dto = await expenses.CreateSettlementAsync(id, req, Actor, ct);
         return Created($"/api/groups/{id}/settlements/{dto.Id}", dto);
     }
 
+    /// <summary>The receiver confirms the money arrived; only then it counts in the balances.</summary>
+    [HttpPost("{id:guid}/settlements/{settlementId:guid}/confirm")]
+    [GroupAccess(RequireMember = true)]
+    public Task<SettlementDto> ConfirmSettlement(Guid id, Guid settlementId, CancellationToken ct) =>
+        expenses.ConfirmSettlementAsync(id, settlementId, Actor, ct);
+
     [HttpDelete("{id:guid}/settlements/{settlementId:guid}")]
-    [GroupAccess]
+    [GroupAccess(RequireMember = true)]
     public async Task<IActionResult> DeleteSettlement(Guid id, Guid settlementId, CancellationToken ct)
     {
-        await expenses.DeleteSettlementAsync(id, settlementId, ct);
+        await expenses.DeleteSettlementAsync(id, settlementId, Actor, ct);
         return NoContent();
     }
 
