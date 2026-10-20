@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using RachaConta.Api.Contracts;
 using RachaConta.Api.Services;
 
@@ -6,7 +7,7 @@ namespace RachaConta.Api.Controllers;
 
 [ApiController]
 [Route("api/groups")]
-public sealed class GroupsController(GroupService groups, ExpenseService expenses) : ControllerBase
+public sealed class GroupsController(GroupService groups, ExpenseService expenses, DeviceLinkService devices) : ControllerBase
 {
     /// <summary>Who is calling; set by <see cref="GroupAccessAttribute"/> on every group endpoint.</summary>
     private GroupActor Actor => (GroupActor)HttpContext.Items[GroupAccessAttribute.ItemKey]!;
@@ -51,6 +52,32 @@ public sealed class GroupsController(GroupService groups, ExpenseService expense
     [GroupAccess(ClaimOnly = true)]
     public Task<ClaimResultDto> Claim(Guid id, [FromBody] ClaimRequest req, CancellationToken ct) =>
         groups.ClaimAsync(id, req, Actor, ct);
+
+    // ---------- Devices ----------
+
+    /// <summary>Creates a single-use code (5 minutes) to connect another device to your member.</summary>
+    [HttpPost("{id:guid}/members/me/link-codes")]
+    [GroupAccess(RequireMember = true)]
+    public Task<LinkCodeDto> CreateLinkCode(Guid id, CancellationToken ct) => devices.CreateCodeAsync(Actor, ct);
+
+    /// <summary>Trades a link code for a personal token of the member that generated it. Uses the invite token.</summary>
+    [HttpPost("{id:guid}/link-codes/redeem")]
+    [GroupAccess(ClaimOnly = true)]
+    [EnableRateLimiting("link-redeem")]
+    public Task<ClaimResultDto> RedeemLinkCode(Guid id, [FromBody] RedeemLinkCodeRequest req, CancellationToken ct) =>
+        devices.RedeemAsync(id, req, ct);
+
+    [HttpGet("{id:guid}/members/me/devices")]
+    [GroupAccess(RequireMember = true)]
+    public Task<IReadOnlyList<DeviceDto>> ListDevices(Guid id, CancellationToken ct) => devices.ListAsync(Actor, ct);
+
+    [HttpDelete("{id:guid}/members/me/devices/{deviceId:guid}")]
+    [GroupAccess(RequireMember = true)]
+    public async Task<IActionResult> RevokeDevice(Guid id, Guid deviceId, CancellationToken ct)
+    {
+        await devices.RevokeAsync(Actor, deviceId, ct);
+        return NoContent();
+    }
 
     // ---------- Members ----------
 

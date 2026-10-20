@@ -10,7 +10,7 @@ namespace RachaConta.Api.Controllers;
 /// Who is calling a group endpoint. A personal member token gives a member identity;
 /// the group's AdminToken gives admin power without identity; the AccessToken is only an invite.
 /// </summary>
-public sealed record GroupActor(Guid? MemberId, bool IsAdmin, bool IsInvite, bool ViaAdminToken = false)
+public sealed record GroupActor(Guid? MemberId, bool IsAdmin, bool IsInvite, bool ViaAdminToken = false, Guid? DeviceId = null)
 {
     public bool IsIdentified => MemberId is not null;
 
@@ -60,11 +60,16 @@ public sealed class GroupAccessAttribute : Attribute, IAsyncActionFilter
             else if (!string.IsNullOrEmpty(provided))
             {
                 var hash = Tokens.Hash(provided);
-                var member = await db.Members.AsNoTracking()
-                    .Where(m => m.GroupId == id && m.TokenHash == hash)
-                    .Select(m => new { m.Id, m.IsAdmin })
+                var device = await db.MemberDevices.AsNoTracking()
+                    .Where(d => d.TokenHash == hash)
+                    .Join(db.Members.Where(m => m.GroupId == id), d => d.MemberId, m => m.Id,
+                        (d, m) => new { DeviceId = d.Id, MemberId = m.Id, m.IsAdmin, d.LastUsedAt })
                     .FirstOrDefaultAsync(http.RequestAborted);
-                if (member is not null) actor = new GroupActor(member.Id, member.IsAdmin, false);
+                if (device is not null)
+                {
+                    actor = new GroupActor(device.MemberId, device.IsAdmin, false, DeviceId: device.DeviceId);
+                    await TouchDeviceAsync(http, db, device.DeviceId, device.LastUsedAt);
+                }
             }
         }
 
@@ -79,5 +84,14 @@ public sealed class GroupAccessAttribute : Attribute, IAsyncActionFilter
 
         http.Items[ItemKey] = actor;
         await next();
+    }
+
+    /// <summary>Best-effort "last seen" stamp, throttled so reads do not turn into writes.</summary>
+    private static async Task TouchDeviceAsync(HttpContext http, AppDbContext db, Guid deviceId, DateTime? lastUsedAt)
+    {
+        var now = http.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow().UtcDateTime;
+        if (lastUsedAt is { } last && now - last < TimeSpan.FromMinutes(5)) return;
+        await db.MemberDevices.Where(d => d.Id == deviceId)
+            .ExecuteUpdateAsync(u => u.SetProperty(d => d.LastUsedAt, now), http.RequestAborted);
     }
 }

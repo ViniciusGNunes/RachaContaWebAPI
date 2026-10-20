@@ -223,6 +223,7 @@ public class GroupAccessTests : IDisposable
             Microsoft.Extensions.Options.Options.Create(new PixOptions()));
         _services = new Microsoft.Extensions.DependencyInjection.ServiceCollection()
             .AddSingleton(_db)
+            .AddSingleton(TimeProvider.System)
             .BuildServiceProvider();
     }
 
@@ -258,7 +259,7 @@ public class GroupAccessTests : IDisposable
                     actionContext, [], controller: new object()));
             });
         }
-        catch (NotFoundException)
+        catch (Exception ex) when (ex is NotFoundException or ForbiddenException)
         {
             return false;
         }
@@ -339,5 +340,153 @@ public class GroupAccessTests : IDisposable
         Assert.True(result.Single(g => g.Id == mine.Id).IsAdmin);
         Assert.False(result.Single(g => g.Id == shared.Id).IsAdmin);
         Assert.DoesNotContain(result, g => g.Id == other.Id);
+    }
+}
+
+public class DeviceLinkTests : IDisposable
+{
+    private sealed class FakeClock(DateTimeOffset start) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = start;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private readonly Microsoft.Data.Sqlite.SqliteConnection _connection = new("DataSource=:memory:");
+    private readonly RachaConta.Api.Data.AppDbContext _db;
+    private readonly FakeClock _clock = new(new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero));
+    private readonly GroupService _groups;
+    private readonly DeviceLinkService _devices;
+
+    public DeviceLinkTests()
+    {
+        _connection.Open();
+        var options = new DbContextOptionsBuilder<RachaConta.Api.Data.AppDbContext>().UseSqlite(_connection).Options;
+        _db = new RachaConta.Api.Data.AppDbContext(options);
+        _db.Database.EnsureCreated();
+        _groups = new GroupService(_db, _clock, Microsoft.Extensions.Options.Options.Create(new PixOptions()));
+        _devices = new DeviceLinkService(_db, _clock);
+    }
+
+    public void Dispose()
+    {
+        _db.Dispose();
+        _connection.Dispose();
+    }
+
+    private static readonly RachaConta.Api.Controllers.GroupActor Invite = new(null, false, true);
+
+    private async Task<(Guid GroupId, RachaConta.Api.Contracts.ClaimResultDto Claim, RachaConta.Api.Controllers.GroupActor Actor)> ClaimedMemberAsync()
+    {
+        var group = await _groups.CreateAsync(new RachaConta.Api.Contracts.CreateGroupRequest("Viagem", null,
+            [new("Ana", null, null), new("Beto", null, null)]), CancellationToken.None);
+        var ana = group.Members.Single(m => m.Name == "Ana");
+        var claim = await _groups.ClaimAsync(group.Id, new RachaConta.Api.Contracts.ClaimRequest(ana.Id, null, "Celular"), Invite, CancellationToken.None);
+        var device = await _db.MemberDevices.SingleAsync();
+        return (group.Id, claim, new RachaConta.Api.Controllers.GroupActor(ana.Id, false, false, DeviceId: device.Id));
+    }
+
+    [Fact]
+    public async Task Redeemed_code_gives_a_second_working_token_for_the_same_member()
+    {
+        var (groupId, claim, actor) = await ClaimedMemberAsync();
+        var code = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+
+        var redeemed = await _devices.RedeemAsync(groupId, new("  " + code.Code.ToLowerInvariant() + " ", "Notebook"), CancellationToken.None);
+
+        Assert.Equal(claim.Member.Id, redeemed.Member.Id);
+        Assert.NotEqual(claim.MemberToken, redeemed.MemberToken);
+        var hashes = await _db.MemberDevices.Select(d => d.TokenHash).ToListAsync();
+        Assert.Contains(Tokens.Hash(claim.MemberToken), hashes);
+        Assert.Contains(Tokens.Hash(redeemed.MemberToken), hashes);
+        Assert.Equal(2, (await _devices.ListAsync(actor, CancellationToken.None)).Count);
+    }
+
+    [Fact]
+    public async Task Code_is_single_use()
+    {
+        var (groupId, _, actor) = await ClaimedMemberAsync();
+        var code = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+        await _devices.RedeemAsync(groupId, new(code.Code), CancellationToken.None);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _devices.RedeemAsync(groupId, new(code.Code), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Code_expires_after_five_minutes()
+    {
+        var (groupId, _, actor) = await ClaimedMemberAsync();
+        var code = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+        _clock.Now += DeviceLinkService.CodeLifetime + TimeSpan.FromSeconds(1);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _devices.RedeemAsync(groupId, new(code.Code), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task New_code_replaces_the_pending_one()
+    {
+        var (groupId, _, actor) = await ClaimedMemberAsync();
+        var first = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+        await _devices.CreateCodeAsync(actor, CancellationToken.None);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _devices.RedeemAsync(groupId, new(first.Code), CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("SHORT")]
+    [InlineData("AAAAAAAA")]
+    public async Task Wrong_code_is_rejected(string? code)
+    {
+        var (groupId, _, actor) = await ClaimedMemberAsync();
+        await _devices.CreateCodeAsync(actor, CancellationToken.None);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _devices.RedeemAsync(groupId, new(code), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Code_does_not_work_in_another_group()
+    {
+        var (_, _, actor) = await ClaimedMemberAsync();
+        var code = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _devices.RedeemAsync(Guid.NewGuid(), new(code.Code), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Only_identified_members_create_codes()
+    {
+        await ClaimedMemberAsync();
+        await Assert.ThrowsAsync<ForbiddenException>(() => _devices.CreateCodeAsync(Invite, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Revoked_device_loses_access_but_the_last_one_cannot_be_removed()
+    {
+        var (groupId, claim, actor) = await ClaimedMemberAsync();
+        var code = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+        var redeemed = await _devices.RedeemAsync(groupId, new(code.Code, "Notebook"), CancellationToken.None);
+        var second = await _db.MemberDevices.SingleAsync(d => d.TokenHash == Tokens.Hash(redeemed.MemberToken));
+
+        await _devices.RevokeAsync(actor, second.Id, CancellationToken.None);
+
+        Assert.False(await _db.MemberDevices.AnyAsync(d => d.TokenHash == Tokens.Hash(redeemed.MemberToken)));
+        await Assert.ThrowsAsync<ConflictException>(() => _devices.RevokeAsync(actor, actor.DeviceId!.Value, CancellationToken.None));
+        await Assert.ThrowsAsync<NotFoundException>(() => _devices.RevokeAsync(actor, Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Admin_reset_removes_every_device_and_pending_code()
+    {
+        var (groupId, claim, actor) = await ClaimedMemberAsync();
+        var code = await _devices.CreateCodeAsync(actor, CancellationToken.None);
+        await _devices.RedeemAsync(groupId, new(code.Code), CancellationToken.None);
+        await _devices.CreateCodeAsync(actor, CancellationToken.None);
+
+        await _groups.ResetClaimAsync(groupId, claim.Member.Id, CancellationToken.None);
+
+        Assert.Empty(_db.MemberDevices);
+        Assert.Empty(_db.MemberLinkCodes);
+        Assert.Null((await _db.Members.AsNoTracking().SingleAsync(m => m.Id == claim.Member.Id)).ClaimedAt);
     }
 }

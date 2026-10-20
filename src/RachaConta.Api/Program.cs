@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using RachaConta.Api.Data;
 using RachaConta.Api.Infrastructure;
@@ -32,6 +33,15 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.Configure<PixOptions>(builder.Configuration.GetSection("Pix"));
 builder.Services.AddScoped<SplitService>();
 builder.Services.AddScoped<GroupService>();
+builder.Services.AddScoped<DeviceLinkService>();
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // Link codes are short, so cap guesses per client and group.
+    o.AddPolicy("link-redeem", http => RateLimitPartition.GetFixedWindowLimiter(
+        $"{http.Connection.RemoteIpAddress}|{http.Request.RouteValues["id"]}",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(1) }));
+});
 builder.Services.AddScoped<ExpenseService>();
 
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"];
@@ -47,6 +57,7 @@ using (var scope = app.Services.CreateScope())
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseCors();
+app.UseRateLimiter();
 app.MapControllers();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 
