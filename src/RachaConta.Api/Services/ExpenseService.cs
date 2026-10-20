@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RachaConta.Api.Contracts;
+using RachaConta.Api.Controllers;
 using RachaConta.Api.Data;
 using RachaConta.Api.Domain;
 
@@ -16,11 +17,10 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
         if (filter.From is { } f && filter.To is { } t && f > t)
             throw new ValidationException("from", "'from' must be on or before 'to'.");
 
-        var query = db.Expenses.AsNoTracking().Include(e => e.Shares).Where(e => e.GroupId == groupId);
+        var query = db.Expenses.AsNoTracking().Include(e => e.Shares).Include(e => e.Confirmations).Where(e => e.GroupId == groupId);
         if (filter.From is { } from) query = query.Where(e => e.Date >= from);
         if (filter.To is { } to) query = query.Where(e => e.Date <= to);
         if (filter.Category is { } category) query = query.Where(e => e.Category == category);
-        if (filter.PaymentMethod is { } method) query = query.Where(e => e.PaymentMethod == method);
         if (filter.MemberId is { } memberId)
             query = query.Where(e => e.PaidByMemberId == memberId || e.Shares.Any(s => s.MemberId == memberId));
 
@@ -38,35 +38,96 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
         return ToDto(expense, members);
     }
 
-    public async Task<ExpenseDto> CreateAsync(Guid groupId, ExpenseRequest req, CancellationToken ct)
+    public async Task<ExpenseDto> CreateAsync(Guid groupId, ExpenseRequest req, GroupActor actor, CancellationToken ct)
     {
         var members = await LoadMembersAsync(groupId, ct);
-        var expense = new Expense { Id = Guid.NewGuid(), GroupId = groupId, CreatedAt = clock.GetUtcNow().UtcDateTime };
+        var now = clock.GetUtcNow().UtcDateTime;
+        var expense = new Expense
+        {
+            Id = Guid.NewGuid(), GroupId = groupId, CreatedAt = now, CreatedByMemberId = actor.MemberId,
+        };
         Apply(expense, req, members);
+        expense.Confirmations = AutoConfirmations(expense, actor.MemberId, now);
         db.Expenses.Add(expense);
         await db.SaveChangesAsync(ct);
         return ToDto(expense, members);
     }
 
-    public async Task<ExpenseDto> UpdateAsync(Guid groupId, Guid expenseId, ExpenseRequest req, CancellationToken ct)
+    public async Task<ExpenseDto> UpdateAsync(Guid groupId, Guid expenseId, ExpenseRequest req, GroupActor actor, CancellationToken ct)
     {
         var members = await LoadMembersAsync(groupId, ct);
         var expense = await LoadExpenseAsync(groupId, expenseId, ct, tracking: true);
+        if (!actor.CanModify(expense.CreatedByMemberId))
+            throw new ForbiddenException("Only the person who added this expense, or the admin, can edit it.");
+
+        var now = clock.GetUtcNow().UtcDateTime;
         var oldShares = expense.Shares.ToList();
+        var oldConfirmations = expense.Confirmations.ToList();
         Apply(expense, req, members);
+        expense.UpdatedByMemberId = actor.MemberId;
+        expense.UpdatedAt = now;
+        // The numbers changed, so earlier confirmations no longer apply.
+        expense.Confirmations = AutoConfirmations(expense, actor.MemberId, now);
+        db.ExpenseConfirmations.RemoveRange(oldConfirmations);
         db.ExpenseShares.RemoveRange(oldShares);
         db.ExpenseShares.AddRange(expense.Shares);
+        db.ExpenseConfirmations.AddRange(expense.Confirmations);
         await db.SaveChangesAsync(ct);
         return ToDto(expense, members);
     }
 
-    public async Task DeleteAsync(Guid groupId, Guid expenseId, CancellationToken ct)
+    public async Task DeleteAsync(Guid groupId, Guid expenseId, GroupActor actor, CancellationToken ct)
     {
         await EnsureGroupAsync(groupId, ct);
         var expense = await LoadExpenseAsync(groupId, expenseId, ct, tracking: true);
+        if (!actor.CanModify(expense.CreatedByMemberId))
+            throw new ForbiddenException("Only the person who added this expense, or the admin, can delete it.");
         db.Expenses.Remove(expense);
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>A participant confirms or contests an expense that was split with them.</summary>
+    public async Task<ExpenseDto> ConfirmAsync(Guid groupId, Guid expenseId, ConfirmationRequest req, GroupActor actor, CancellationToken ct)
+    {
+        var members = await LoadMembersAsync(groupId, ct);
+        var expense = await LoadExpenseAsync(groupId, expenseId, ct, tracking: true);
+
+        if (actor.MemberId is not { } me || !RequiredConfirmers(expense).Contains(me))
+            throw new ForbiddenException("Only the people this expense was split with can confirm or contest it.");
+        if (req.Status is not { } status)
+            throw new ValidationException("status", "Status is required (Confirmed or Contested).");
+        var comment = string.IsNullOrWhiteSpace(req.Comment) ? null : req.Comment.Trim();
+        if (comment?.Length > 200) throw new ValidationException("comment", "Comment must have at most 200 characters.");
+
+        var now = clock.GetUtcNow().UtcDateTime;
+        var existing = expense.Confirmations.FirstOrDefault(c => c.MemberId == me);
+        if (existing is null)
+        {
+            var created = new ExpenseConfirmation
+            {
+                Id = Guid.NewGuid(), ExpenseId = expense.Id, MemberId = me, Status = status, Comment = comment, CreatedAt = now,
+            };
+            db.ExpenseConfirmations.Add(created); // Added explicitly; EF links it to the tracked expense
+        }
+        else
+        {
+            existing.Status = status;
+            existing.Comment = comment;
+            existing.CreatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+        return ToDto(expense, members);
+    }
+
+    /// <summary>Members who must confirm: everyone sharing the expense except whoever paid it.</summary>
+    public static HashSet<Guid> RequiredConfirmers(Expense expense) =>
+        expense.Shares.Select(s => s.MemberId).Where(id => id != expense.PaidByMemberId).ToHashSet();
+
+    /// <summary>The person who adds or edits an expense already agrees with it, if they take part in it.</summary>
+    private static List<ExpenseConfirmation> AutoConfirmations(Expense expense, Guid? actorMemberId, DateTime now) =>
+        actorMemberId is { } me && RequiredConfirmers(expense).Contains(me)
+            ? [new ExpenseConfirmation { Id = Guid.NewGuid(), ExpenseId = expense.Id, MemberId = me, Status = ConfirmationStatus.Confirmed, CreatedAt = now }]
+            : [];
 
     /// <summary>Validates the request and writes fields + computed shares into <paramref name="expense"/>.</summary>
     public static void Apply(Expense expense, ExpenseRequest req, IReadOnlyDictionary<Guid, Member> members)
@@ -82,8 +143,6 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
         else if (!ShareCalculator.HasAtMostTwoDecimals(amount)) errors.Add("amount", "Amount must have at most 2 decimal places.");
 
         if (req.Date is null) errors.Add("date", "Date is required (yyyy-MM-dd).");
-        if (req.Category is null) errors.Add("category", "Category is required.");
-        if (req.PaymentMethod is null) errors.Add("paymentMethod", "Payment method is required.");
         if (req.PaidByMemberId is not { } paidBy) errors.Add("paidByMemberId", "Paying member is required.");
         else if (!members.ContainsKey(paidBy)) errors.Add("paidByMemberId", "Paying member does not belong to this group.");
 
@@ -144,8 +203,8 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
         expense.Description = description;
         expense.Amount = amount;
         expense.Date = req.Date!.Value;
-        expense.Category = req.Category!.Value;
-        expense.PaymentMethod = req.PaymentMethod!.Value;
+        expense.Category = req.Category ?? ExpenseCategory.Uncategorized;
+        expense.PaymentMethod = req.PaymentMethod ?? PaymentMethod.Other;
         expense.PaidByMemberId = req.PaidByMemberId!.Value;
         expense.ShareMode = mode;
         expense.Notes = notes;
@@ -172,7 +231,7 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
             .ToList();
     }
 
-    public async Task<SettlementDto> CreateSettlementAsync(Guid groupId, CreateSettlementRequest req, CancellationToken ct)
+    public async Task<SettlementDto> CreateSettlementAsync(Guid groupId, CreateSettlementRequest req, GroupActor actor, CancellationToken ct)
     {
         var members = await LoadMembersAsync(groupId, ct);
         var errors = new ValidationErrors();
@@ -189,10 +248,17 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
         else if (!ShareCalculator.HasAtMostTwoDecimals(amount)) errors.Add("amount", "Amount must have at most 2 decimal places.");
 
         if (req.Date is null) errors.Add("date", "Date is required (yyyy-MM-dd).");
-        if (req.PaymentMethod is null) errors.Add("paymentMethod", "Payment method is required.");
         var notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim();
         if (notes?.Length > 500) errors.Add("notes", "Notes must have at most 500 characters.");
         errors.ThrowIfAny();
+
+        if (!actor.IsAdmin && actor.MemberId != req.FromMemberId && actor.MemberId != req.ToMemberId)
+            throw new ForbiddenException("You can only register payments you made or received.");
+
+        // Money received counts only after the receiver confirms. The receiver's own entry, or an admin
+        // acting for others, is confirmed right away.
+        var now = clock.GetUtcNow().UtcDateTime;
+        var confirmedNow = actor.MemberId == req.ToMemberId || (actor.IsAdmin && actor.MemberId != req.FromMemberId);
 
         var settlement = new Settlement
         {
@@ -202,20 +268,44 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
             ToMemberId = req.ToMemberId!.Value,
             Amount = req.Amount!.Value,
             Date = req.Date!.Value,
-            PaymentMethod = req.PaymentMethod!.Value,
+            PaymentMethod = req.PaymentMethod ?? PaymentMethod.Other,
             Notes = notes,
-            CreatedAt = clock.GetUtcNow().UtcDateTime,
+            CreatedAt = now,
+            CreatedByMemberId = actor.MemberId,
+            Status = confirmedNow ? SettlementStatus.Confirmed : SettlementStatus.Pending,
+            ConfirmedAt = confirmedNow ? now : null,
         };
         db.Settlements.Add(settlement);
         await db.SaveChangesAsync(ct);
         return ToDto(settlement, members);
     }
 
-    public async Task DeleteSettlementAsync(Guid groupId, Guid settlementId, CancellationToken ct)
+    public async Task<SettlementDto> ConfirmSettlementAsync(Guid groupId, Guid settlementId, GroupActor actor, CancellationToken ct)
+    {
+        var members = await LoadMembersAsync(groupId, ct);
+        var settlement = await db.Settlements.FirstOrDefaultAsync(s => s.Id == settlementId && s.GroupId == groupId, ct)
+                         ?? throw new NotFoundException($"Settlement '{settlementId}' not found in this group.");
+        if (!actor.IsAdmin && actor.MemberId != settlement.ToMemberId)
+            throw new ForbiddenException("Only the person who received the money can confirm it.");
+
+        if (settlement.Status != SettlementStatus.Confirmed)
+        {
+            settlement.Status = SettlementStatus.Confirmed;
+            settlement.ConfirmedAt = clock.GetUtcNow().UtcDateTime;
+            await db.SaveChangesAsync(ct);
+        }
+        return ToDto(settlement, members);
+    }
+
+    public async Task DeleteSettlementAsync(Guid groupId, Guid settlementId, GroupActor actor, CancellationToken ct)
     {
         await EnsureGroupAsync(groupId, ct);
         var settlement = await db.Settlements.FirstOrDefaultAsync(s => s.Id == settlementId && s.GroupId == groupId, ct)
                          ?? throw new NotFoundException($"Settlement '{settlementId}' not found in this group.");
+        // The receiver may also refuse a payment that is still waiting for confirmation.
+        var refusal = settlement.Status == SettlementStatus.Pending && actor.MemberId == settlement.ToMemberId;
+        if (!actor.CanModify(settlement.CreatedByMemberId) && !refusal)
+            throw new ForbiddenException("Only the person who registered this payment, or the admin, can remove it.");
         db.Settlements.Remove(settlement);
         await db.SaveChangesAsync(ct);
     }
@@ -226,7 +316,8 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
     {
         var members = await LoadMembersAsync(groupId, ct);
         var expenses = await db.Expenses.AsNoTracking().Include(e => e.Shares).Where(e => e.GroupId == groupId).ToListAsync(ct);
-        var settlements = await db.Settlements.AsNoTracking().Where(s => s.GroupId == groupId).ToListAsync(ct);
+        var settlements = await db.Settlements.AsNoTracking()
+            .Where(s => s.GroupId == groupId && s.Status == SettlementStatus.Confirmed).ToListAsync(ct);
 
         var balances = BalanceCalculator.Compute(
             OrderedMembers(members),
@@ -260,9 +351,6 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
             expenses.GroupBy(e => e.Category)
                 .Select(g => new CategoryTotalDto(g.Key, g.Sum(e => e.Amount)))
                 .OrderByDescending(x => x.Total).ThenBy(x => x.Category).ToList(),
-            expenses.GroupBy(e => e.PaymentMethod)
-                .Select(g => new PaymentMethodTotalDto(g.Key, g.Sum(e => e.Amount)))
-                .OrderByDescending(x => x.Total).ThenBy(x => x.PaymentMethod).ToList(),
             balances.Select(b => new MemberStatsDto(b.MemberId, b.Name, b.Paid, b.Owed)).ToList(),
             expenses.GroupBy(e => e.Date.ToString("yyyy-MM"))
                 .Select(g => new MonthTotalDto(g.Key, g.Sum(e => e.Amount)))
@@ -290,7 +378,7 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
 
     private async Task<Expense> LoadExpenseAsync(Guid groupId, Guid expenseId, CancellationToken ct, bool tracking = false)
     {
-        var query = db.Expenses.Include(e => e.Shares).Where(e => e.Id == expenseId && e.GroupId == groupId);
+        var query = db.Expenses.Include(e => e.Shares).Include(e => e.Confirmations).Where(e => e.Id == expenseId && e.GroupId == groupId);
         if (!tracking) query = query.AsNoTracking();
         return await query.FirstOrDefaultAsync(ct)
                ?? throw new NotFoundException($"Expense '{expenseId}' not found in this group.");
@@ -304,9 +392,14 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock)
         e.PaidByMemberId, NameOf(members, e.PaidByMemberId), e.ShareMode,
         e.Shares.OrderBy(s => s.Position)
             .Select(s => new ExpenseShareDto(s.MemberId, NameOf(members, s.MemberId), s.Amount, s.Percentage)).ToList(),
-        e.Notes, e.CreatedAt);
+        e.Notes, e.CreatedAt,
+        e.CreatedByMemberId, e.CreatedByMemberId is { } cb ? NameOf(members, cb) : null,
+        e.UpdatedByMemberId is { } ub ? NameOf(members, ub) : null, e.UpdatedAt,
+        e.Confirmations.OrderBy(c => c.CreatedAt)
+            .Select(c => new ExpenseConfirmationDto(c.MemberId, NameOf(members, c.MemberId), c.Status, c.Comment, c.CreatedAt)).ToList());
 
     private static SettlementDto ToDto(Settlement s, Dictionary<Guid, Member> members) => new(
         s.Id, s.GroupId, s.FromMemberId, NameOf(members, s.FromMemberId), s.ToMemberId, NameOf(members, s.ToMemberId),
-        s.Amount, s.Date, s.PaymentMethod, s.Notes, s.CreatedAt);
+        s.Amount, s.Date, s.PaymentMethod, s.Notes, s.CreatedAt,
+        s.CreatedByMemberId, s.CreatedByMemberId is { } cb ? NameOf(members, cb) : null, s.Status, s.ConfirmedAt);
 }

@@ -45,4 +45,17 @@ public enum ExpenseCategory
     Travel,
     Shopping,
     Other,
+    Uncategorized,
+}
+
+public enum ConfirmationStatus
+{
+    Confirmed,
+    Contested,
+}
+
+public enum SettlementStatus
+{
+    Pending,
+    Confirmed,
 }

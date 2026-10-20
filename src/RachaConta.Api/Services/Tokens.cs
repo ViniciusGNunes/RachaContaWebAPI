@@ -12,6 +12,10 @@ public static class Tokens
     /// <summary>32-char secret admin token (~190 bits).</summary>
     public static string NewAdminToken() => RandomNumberGenerator.GetString(Alphabet, 32);
 
+    /// <summary>SHA-256 hex of a high-entropy token; safe to store and index.</summary>
+    public static string Hash(string token) =>
+        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token)));
+
     public static bool FixedTimeEquals(string? a, string b) =>
         !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) && CryptographicOperations.FixedTimeEquals(
             System.Text.Encoding.UTF8.GetBytes(a), System.Text.Encoding.UTF8.GetBytes(b));

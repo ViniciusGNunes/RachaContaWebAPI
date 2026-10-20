@@ -40,6 +40,9 @@ namespace RachaConta.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("CreatedByMemberId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
@@ -68,6 +71,12 @@ namespace RachaConta.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByMemberId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PaidByMemberId");
@@ -75,6 +84,38 @@ namespace RachaConta.Api.Migrations
                     b.HasIndex("GroupId", "Date");
 
                     b.ToTable("Expenses");
+                });
+
+            modelBuilder.Entity("RachaConta.Api.Domain.ExpenseConfirmation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ExpenseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpenseId", "MemberId")
+                        .IsUnique();
+
+                    b.ToTable("ExpenseConfirmations");
                 });
 
             modelBuilder.Entity("RachaConta.Api.Domain.ExpenseShare", b =>
@@ -151,11 +192,17 @@ namespace RachaConta.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ClaimedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("GroupId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -170,9 +217,15 @@ namespace RachaConta.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("GroupId");
+
+                    b.HasIndex("TokenHash");
 
                     b.ToTable("Members");
                 });
@@ -187,8 +240,14 @@ namespace RachaConta.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByMemberId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
@@ -204,6 +263,11 @@ namespace RachaConta.Api.Migrations
                         .HasColumnType("character varying(500)");
 
                     b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -343,6 +407,15 @@ namespace RachaConta.Api.Migrations
                     b.Navigation("PaidBy");
                 });
 
+            modelBuilder.Entity("RachaConta.Api.Domain.ExpenseConfirmation", b =>
+                {
+                    b.HasOne("RachaConta.Api.Domain.Expense", null)
+                        .WithMany("Confirmations")
+                        .HasForeignKey("ExpenseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("RachaConta.Api.Domain.ExpenseShare", b =>
                 {
                     b.HasOne("RachaConta.Api.Domain.Expense", null)
@@ -405,6 +478,8 @@ namespace RachaConta.Api.Migrations
 
             modelBuilder.Entity("RachaConta.Api.Domain.Expense", b =>
                 {
+                    b.Navigation("Confirmations");
+
                     b.Navigation("Shares");
                 });
 

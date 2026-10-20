@@ -56,6 +56,10 @@ public class Member
     public string? PixKey { get; set; }
     public PixKeyType? PixKeyType { get; set; }
     public DateTime CreatedAt { get; set; }
+    /// <summary>SHA-256 (hex) of the member's personal token; null while nobody has claimed this member.</summary>
+    public string? TokenHash { get; set; }
+    public DateTime? ClaimedAt { get; set; }
+    public bool IsAdmin { get; set; }
 }
 
 public class Expense
@@ -72,7 +76,21 @@ public class Expense
     public ShareMode ShareMode { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
+    public Guid? CreatedByMemberId { get; set; }
+    public Guid? UpdatedByMemberId { get; set; }
+    public DateTime? UpdatedAt { get; set; }
     public List<ExpenseShare> Shares { get; set; } = [];
+    public List<ExpenseConfirmation> Confirmations { get; set; } = [];
+}
+
+public class ExpenseConfirmation
+{
+    public Guid Id { get; set; }
+    public Guid ExpenseId { get; set; }
+    public Guid MemberId { get; set; }
+    public ConfirmationStatus Status { get; set; }
+    public string? Comment { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public class ExpenseShare
@@ -99,4 +117,7 @@ public class Settlement
     public PaymentMethod PaymentMethod { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
+    public Guid? CreatedByMemberId { get; set; }
+    public SettlementStatus Status { get; set; } = SettlementStatus.Confirmed;
+    public DateTime? ConfirmedAt { get; set; }
 }
