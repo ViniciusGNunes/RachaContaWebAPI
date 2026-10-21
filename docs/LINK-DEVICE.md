@@ -4,7 +4,7 @@ Proposta para permitir usar o mesmo membro de um grupo em mais de um aparelho (e
 
 ## Problema atual
 
-- Ao escolher "Quem é você?", a API gera um **token pessoal** e devolve uma única vez (`ClaimAsync`, [GroupService.cs:89](../src/RachaConta.Api/Services/GroupService.cs#L89)).
+- Ao escolher "Quem é você?", a API gera um **token pessoal** e devolve uma única vez (`ClaimAsync`, [GroupService.cs:89](../src/RachaPix.Api/Services/GroupService.cs#L89)).
 - O token só fica no `localStorage` do navegador. No banco fica apenas o hash (`Members.TokenHash`), então **ninguém consegue recuperá-lo**.
 - Um membro só pode ser reivindicado uma vez. Para usar em outro aparelho hoje é preciso o admin clicar em "Liberar acesso" (`ResetClaimAsync`), o que derruba o aparelho antigo.
 
@@ -56,7 +56,7 @@ Hoje existe um único `Members.TokenHash`. Para ter vários aparelhos, o token p
 Detalhes:
 
 - **Resgate atômico:** igual ao `ClaimAsync`, usar `ExecuteUpdateAsync ... Where UsedAt == null && ExpiresAt > now`. Se `rows == 0`, responder 404 genérico, sem dizer se o código estava errado, expirado ou usado.
-- **`GroupAccessAttribute`** ([GroupAccessAttribute.cs](../src/RachaConta.Api/Controllers/GroupAccessAttribute.cs)): hoje procura o token em `Members.TokenHash`. Passa a procurar em `MemberDevices.TokenHash` e atualizar `LastUsedAt`. O resgate usa o modo `ClaimOnly`, que já aceita só token de convite ou admin.
+- **`GroupAccessAttribute`** ([GroupAccessAttribute.cs](../src/RachaPix.Api/Controllers/GroupAccessAttribute.cs)): hoje procura o token em `Members.TokenHash`. Passa a procurar em `MemberDevices.TokenHash` e atualizar `LastUsedAt`. O resgate usa o modo `ClaimOnly`, que já aceita só token de convite ou admin.
 - **Admin:** se o membro for admin, o aparelho novo herda `IsAdmin` do `Member`, sem mudança.
 - **`ResetClaimAsync`** passa a apagar todos os `MemberDevices` do membro e os códigos pendentes.
 
@@ -103,7 +103,7 @@ Detalhes:
 1. Migration com `MemberDevices` e `MemberLinkCodes`, mais cópia dos tokens atuais.
 2. Ajustar `ClaimAsync`, `ResetClaimAsync` e `GroupAccessAttribute` para usar `MemberDevices`.
 3. Endpoints de gerar código, resgatar, listar e revogar aparelhos, com rate limit.
-4. Testes: resgate feliz, código reutilizado, código expirado, resgate concorrente (dois aparelhos com o mesmo código), revogação, reset do admin. Em [ServiceTests.cs](../tests/RachaConta.Tests/ServiceTests.cs).
+4. Testes: resgate feliz, código reutilizado, código expirado, resgate concorrente (dois aparelhos com o mesmo código), revogação, reset do admin. Em [ServiceTests.cs](../tests/RachaPix.Tests/ServiceTests.cs).
 5. Front: tela de conexão (QR + link), rota de resgate, lista de aparelhos.
 6. Documentar os endpoints novos em [API.md](API.md).
 
