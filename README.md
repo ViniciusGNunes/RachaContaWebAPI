@@ -1,4 +1,4 @@
-# RachaConta backend
+# RachaPix backend
 
 ASP.NET Core 9 Web API + EF Core 9 (PostgreSQL). Contract: [`docs/API.md`](docs/API.md).
 
@@ -15,12 +15,12 @@ ASP.NET Core 9 Web API + EF Core 9 (PostgreSQL). Contract: [`docs/API.md`](docs/
 
 ## Run
 ```bash
-cd src/RachaConta.Api
+cd src/RachaPix.Api
 ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5080
 # or: dotnet run --launch-profile http
 ```
 Migrations auto-apply on startup (needs a reachable Postgres; set `ConnectionStrings__Default`). Health check: `GET /api/health`.
-Outside Development, apply migrations with `dotnet tool run dotnet-ef database update --project src/RachaConta.Api`.
+Outside Development, apply migrations with `dotnet tool run dotnet-ef database update --project src/RachaPix.Api`.
 
 ## Test
 ```bash
@@ -30,7 +30,7 @@ dotnet test
 ## Migrations
 ```bash
 dotnet tool restore
-dotnet tool run dotnet-ef migrations add <Name> --project src/RachaConta.Api --output-dir Migrations
+dotnet tool run dotnet-ef migrations add <Name> --project src/RachaPix.Api --output-dir Migrations
 ```
 
 ## Config (`appsettings.json`)

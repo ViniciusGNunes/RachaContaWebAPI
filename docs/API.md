@@ -1,9 +1,9 @@
-# RachaConta — API Contract (source of truth)
+# RachaPix — API Contract (source of truth)
 
 Backend and frontend MUST both follow this file. If a change is needed, update this file
 first (in the same commit) and tell the other side via `maestri ask`.
 
-- Backend: ASP.NET Core 9 Web API in `backend/` (solution `backend/RachaConta.sln`, project `backend/src/RachaConta.Api`).
+- Backend: ASP.NET Core 9 Web API in `backend/` (solution `backend/RachaPix.sln`, project `backend/src/RachaPix.Api`).
 - Frontend: Next.js (App Router, TypeScript, Tailwind) in `frontend/`.
 - Backend dev URL: `http://localhost:5080`. Frontend dev URL: `http://localhost:3000`.
 - Frontend reads base URL from `NEXT_PUBLIC_API_URL` (default `http://localhost:5080`).
@@ -264,5 +264,5 @@ Expense create/update body:
   `appsettings.json` → `ConnectionStrings:Default`. Provider chosen via `Database:Provider`
   (`Sqlite` now, `Postgres` later) — keep entity config provider-agnostic (no SQLite-only
   SQL; store decimals with `HasPrecision(18,2)`; use `DateTime` UTC and `DateOnly`).
-- Migrations live in `backend/src/RachaConta.Api/Migrations`. App applies migrations on
+- Migrations live in `backend/src/RachaPix.Api/Migrations`. App applies migrations on
   startup in Development.
