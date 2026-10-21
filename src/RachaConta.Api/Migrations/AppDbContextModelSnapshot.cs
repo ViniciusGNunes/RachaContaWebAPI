@@ -217,17 +217,75 @@ namespace RachaConta.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.ToTable("Members");
+                });
+
+            modelBuilder.Entity("RachaConta.Api.Domain.MemberDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("TokenHash")
+                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("GroupId");
+                    b.HasIndex("MemberId");
 
-                    b.HasIndex("TokenHash");
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
 
-                    b.ToTable("Members");
+                    b.ToTable("MemberDevices");
+                });
+
+            modelBuilder.Entity("RachaConta.Api.Domain.MemberLinkCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique();
+
+                    b.HasIndex("MemberId");
+
+                    b.ToTable("MemberLinkCodes");
                 });
 
             modelBuilder.Entity("RachaConta.Api.Domain.Settlement", b =>
@@ -438,6 +496,24 @@ namespace RachaConta.Api.Migrations
                     b.HasOne("RachaConta.Api.Domain.Group", null)
                         .WithMany("Members")
                         .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("RachaConta.Api.Domain.MemberDevice", b =>
+                {
+                    b.HasOne("RachaConta.Api.Domain.Member", null)
+                        .WithMany()
+                        .HasForeignKey("MemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("RachaConta.Api.Domain.MemberLinkCode", b =>
+                {
+                    b.HasOne("RachaConta.Api.Domain.Member", null)
+                        .WithMany()
+                        .HasForeignKey("MemberId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

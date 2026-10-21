@@ -40,9 +40,9 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         var authorized = new List<(Guid Id, bool IsAdmin)>();
         var byId = requested.ToDictionary(i => i.Id!.Value, i => i.Token!);
         var hashes = byId.Values.Select(Tokens.Hash).ToList();
-        var memberHits = await db.Members.AsNoTracking()
-            .Where(m => ids.Contains(m.GroupId) && m.TokenHash != null && hashes.Contains(m.TokenHash))
-            .Select(m => new { m.GroupId, m.TokenHash, m.IsAdmin })
+        var memberHits = await db.MemberDevices.AsNoTracking()
+            .Join(db.Members, d => d.MemberId, m => m.Id, (d, m) => new { m.GroupId, d.TokenHash, m.IsAdmin })
+            .Where(h => ids.Contains(h.GroupId) && hashes.Contains(h.TokenHash))
             .ToListAsync(ct);
         foreach (var g in groups)
         {
@@ -96,7 +96,7 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         {
             member = group.Members.FirstOrDefault(m => m.Id == memberId)
                      ?? throw new NotFoundException($"Member '{memberId}' not found in this group.");
-            if (member.TokenHash is not null) throw new ConflictException("This member was already claimed by someone.");
+            if (member.ClaimedAt is not null) throw new ConflictException("This member was already claimed by someone.");
         }
         else
         {
@@ -117,14 +117,19 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         var isAdmin = actor.ViaAdminToken;
         // Conditional update keeps two people from claiming the same member at once.
         var rows = await db.Members
-            .Where(m => m.Id == member.Id && m.GroupId == groupId && m.TokenHash == null)
+            .Where(m => m.Id == member.Id && m.GroupId == groupId && m.ClaimedAt == null)
             .ExecuteUpdateAsync(u => u
-                .SetProperty(m => m.TokenHash, hash)
                 .SetProperty(m => m.ClaimedAt, now)
                 .SetProperty(m => m.IsAdmin, isAdmin), ct);
         if (rows == 0) throw new ConflictException("This member was already claimed by someone.");
 
-        member.TokenHash = hash;
+        db.MemberDevices.Add(new MemberDevice
+        {
+            Id = Guid.NewGuid(), MemberId = member.Id, TokenHash = hash,
+            Label = DeviceLinkService.CleanLabel(req.Label), CreatedAt = now,
+        });
+        await db.SaveChangesAsync(ct);
+
         member.ClaimedAt = now;
         member.IsAdmin = isAdmin;
         return new ClaimResultDto(token, ToDto(member));
@@ -136,10 +141,11 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
         var rows = await db.Members
             .Where(m => m.Id == memberId && m.GroupId == groupId)
             .ExecuteUpdateAsync(u => u
-                .SetProperty(m => m.TokenHash, (string?)null)
                 .SetProperty(m => m.ClaimedAt, (DateTime?)null)
                 .SetProperty(m => m.IsAdmin, false), ct);
         if (rows == 0) throw new NotFoundException($"Member '{memberId}' not found in this group.");
+        await db.MemberDevices.Where(d => d.MemberId == memberId).ExecuteDeleteAsync(ct);
+        await db.MemberLinkCodes.Where(c => c.MemberId == memberId).ExecuteDeleteAsync(ct);
     }
 
     public async Task<InviteDto> RotateInviteAsync(Guid groupId, CancellationToken ct)
@@ -363,5 +369,5 @@ public sealed class GroupService(AppDbContext db, TimeProvider clock, Microsoft.
 
     /// <summary>Pix keys are private to identified members: the bare invite link cannot see them.</summary>
     public static MemberDto ToDto(Member m, bool hidePix = false) =>
-        new(m.Id, m.Name, hidePix ? null : m.PixKey, hidePix ? null : m.PixKeyType, m.TokenHash is not null, m.IsAdmin);
+        new(m.Id, m.Name, hidePix ? null : m.PixKey, hidePix ? null : m.PixKeyType, m.ClaimedAt is not null, m.IsAdmin);
 }

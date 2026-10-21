@@ -10,6 +10,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SplitParticipant> SplitParticipants => Set<SplitParticipant>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<Member> Members => Set<Member>();
+    public DbSet<MemberDevice> MemberDevices => Set<MemberDevice>();
+    public DbSet<MemberLinkCode> MemberLinkCodes => Set<MemberLinkCode>();
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<ExpenseShare> ExpenseShares => Set<ExpenseShare>();
     public DbSet<Settlement> Settlements => Set<Settlement>();
@@ -58,8 +60,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(x => x.Name).HasMaxLength(60).IsRequired();
             e.Property(x => x.PixKey).HasMaxLength(77);
-            e.Property(x => x.TokenHash).HasMaxLength(64);
-            e.HasIndex(x => x.TokenHash);
+        });
+
+        b.Entity<MemberDevice>(e =>
+        {
+            e.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Label).HasMaxLength(80);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasOne<Member>().WithMany().HasForeignKey(x => x.MemberId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<MemberLinkCode>(e =>
+        {
+            e.Property(x => x.CodeHash).HasMaxLength(64).IsRequired();
+            e.HasIndex(x => x.CodeHash).IsUnique();
+            e.HasOne<Member>().WithMany().HasForeignKey(x => x.MemberId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Expense>(e =>

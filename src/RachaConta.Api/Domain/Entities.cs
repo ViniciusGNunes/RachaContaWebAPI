@@ -56,10 +56,32 @@ public class Member
     public string? PixKey { get; set; }
     public PixKeyType? PixKeyType { get; set; }
     public DateTime CreatedAt { get; set; }
-    /// <summary>SHA-256 (hex) of the member's personal token; null while nobody has claimed this member.</summary>
-    public string? TokenHash { get; set; }
+    /// <summary>When the member was first claimed; null while nobody holds it. Personal tokens live in <see cref="MemberDevice"/>.</summary>
     public DateTime? ClaimedAt { get; set; }
     public bool IsAdmin { get; set; }
+}
+
+/// <summary>One personal token per browser/device that holds a member's identity.</summary>
+public class MemberDevice
+{
+    public Guid Id { get; set; }
+    public Guid MemberId { get; set; }
+    /// <summary>SHA-256 (hex) of the device's personal token.</summary>
+    public string TokenHash { get; set; } = "";
+    public string? Label { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+}
+
+/// <summary>Short-lived, single-use code that lets another device take over the same member.</summary>
+public class MemberLinkCode
+{
+    public Guid Id { get; set; }
+    public Guid MemberId { get; set; }
+    /// <summary>SHA-256 (hex) of the code.</summary>
+    public string CodeHash { get; set; } = "";
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? UsedAt { get; set; }
 }
 
 public class Expense

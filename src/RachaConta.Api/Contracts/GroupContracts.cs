@@ -32,7 +32,10 @@ public sealed record CreateSettlementRequest(
     string? Notes = null);
 
 /// <summary>Pick who you are: an existing unclaimed member, or a new one by name.</summary>
-public sealed record ClaimRequest(Guid? MemberId, string? NewName);
+public sealed record ClaimRequest(Guid? MemberId, string? NewName, string? Label = null);
+
+/// <summary>Redeems a link code on a new device; the label is a free-text device name.</summary>
+public sealed record RedeemLinkCodeRequest(string? Code, string? Label = null);
 
 public sealed record ConfirmationRequest(ConfirmationStatus? Status, string? Comment);
 
@@ -56,6 +59,11 @@ public sealed record GroupDto(
 public sealed record ClaimResultDto(string MemberToken, MemberDto Member);
 
 public sealed record InviteDto(string AccessToken);
+
+/// <summary>Single-use code to connect another device to the caller's member.</summary>
+public sealed record LinkCodeDto(string Code, DateTime ExpiresAt);
+
+public sealed record DeviceDto(Guid Id, string? Label, DateTime CreatedAt, DateTime? LastUsedAt, bool IsCurrent);
 
 public sealed record GroupLookupItem(Guid? Id, string? Token);
 

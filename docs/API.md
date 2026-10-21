@@ -227,6 +227,19 @@ The share link is `/despesas/{id}#t={accessToken}`; the fragment is never sent t
 | GET | `/api/groups/{id}/stats` | `?from&to` | `StatsDto` |
 | GET | `/api/groups/{id}/members/{memberId}/pix?amount=50.00` | – | `{ pixCode, amount, name, pixKey }` (400 if member has no pix key) |
 
+### Devices (same member on several devices)
+A member can be used on more than one device. Each device holds its own personal token (stored hashed in `MemberDevices`).
+
+| Method | Route | Body | Response |
+|---|---|---|---|
+| POST | `/api/groups/{id}/members/me/link-codes` | – | `{ code, expiresAt }` (8 chars, single use, valid 5 min; replaces any pending code; needs a member token) |
+| POST | `/api/groups/{id}/link-codes/redeem` | `{ code, label? }` + invite/admin token in `X-Group-Token` | `{ memberToken, member }` (new device token for the member that made the code; 404 for wrong, expired or used codes; rate limited to 5/min per client and group, then 429) |
+| GET | `/api/groups/{id}/members/me/devices` | – | `DeviceDto[]` `{ id, label, createdAt, lastUsedAt, isCurrent }` |
+| DELETE | `/api/groups/{id}/members/me/devices/{deviceId}` | – | 204 (409 if it is the only device) |
+
+`POST /api/groups/{id}/claim` also accepts an optional `label` for the first device. An admin "reset claim" removes every device and pending code of the member.
+The device link shared by the app is `/despesas/group?id={id}#t={inviteToken}&link={code}`.
+
 Expense create/update body:
 ```jsonc
 { "description": "Mercado", "amount": 210.30, "date": "2026-10-01",
