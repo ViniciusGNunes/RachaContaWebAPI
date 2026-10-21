@@ -1,6 +1,6 @@
 # RachaConta backend
 
-ASP.NET Core 9 Web API + EF Core 9 (PostgreSQL). Contract: [`../docs/API.md`](../docs/API.md).
+ASP.NET Core 9 Web API + EF Core 9 (PostgreSQL). Contract: [`docs/API.md`](docs/API.md).
 
 ## Requirements
 - .NET 9 SDK **and the ASP.NET Core 9 runtime** (`Microsoft.AspNetCore.App`).
@@ -15,7 +15,7 @@ ASP.NET Core 9 Web API + EF Core 9 (PostgreSQL). Contract: [`../docs/API.md`](..
 
 ## Run
 ```bash
-cd backend/src/RachaConta.Api
+cd src/RachaConta.Api
 ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5080
 # or: dotnet run --launch-profile http
 ```
@@ -24,12 +24,11 @@ Outside Development, apply migrations with `dotnet tool run dotnet-ef database u
 
 ## Test
 ```bash
-cd backend && dotnet test
+dotnet test
 ```
 
 ## Migrations
 ```bash
-cd backend
 dotnet tool restore
 dotnet tool run dotnet-ef migrations add <Name> --project src/RachaConta.Api --output-dir Migrations
 ```

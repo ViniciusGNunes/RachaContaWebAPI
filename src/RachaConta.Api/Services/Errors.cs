@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace RachaConta.Api.Services;
 
 /// <summary>Base class for errors that map to a ProblemDetails response.</summary>
@@ -34,6 +36,7 @@ public sealed class ValidationErrors
     private readonly Dictionary<string, List<string>> _errors = new();
 
     public bool Any => _errors.Count > 0;
+    public IReadOnlyDictionary<string, List<string>> Errors => _errors;
 
     public void Add(string field, string message)
     {
@@ -44,5 +47,16 @@ public sealed class ValidationErrors
     public void ThrowIfAny()
     {
         if (Any) throw new ValidationException(_errors.ToDictionary(e => e.Key, e => e.Value.ToArray()));
+    }
+
+    public IEnumerable<ValidationResult> ToValidationResults()
+    {
+        foreach (var (field, messages) in _errors)
+        {
+            foreach (var message in messages)
+            {
+                yield return new ValidationResult(message, [field]);
+            }
+        }
     }
 }

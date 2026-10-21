@@ -16,6 +16,14 @@ public class Split
     public SplitMode SplitMode { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<SplitParticipant> Participants { get; set; } = [];
+
+    public int PaidCount => Participants.Count(p => p.Paid);
+    public decimal PaidAmount => Participants.Where(p => p.Paid).Sum(p => p.Amount);
+    public int PendingCount => Participants.Count(p => p.PaymentPending);
+
+    public SplitParticipant FindParticipant(Guid participantId) =>
+        Participants.FirstOrDefault(p => p.Id == participantId)
+        ?? throw new Services.NotFoundException($"Participant '{participantId}' not found in this split.");
 }
 
 public class SplitParticipant
@@ -30,6 +38,32 @@ public class SplitParticipant
     public DateTime? PaidAt { get; set; }
     public bool PaymentPending { get; set; }
     public DateTime? ClaimedAt { get; set; }
+
+    public void MarkPendingPayment(DateTime now)
+    {
+        if (!Paid && !PaymentPending)
+        {
+            PaymentPending = true;
+            ClaimedAt = now;
+        }
+    }
+
+    public void TogglePaid(DateTime now)
+    {
+        if (IsOwner)
+            throw new Services.ValidationException("participantId", "The owner is always marked as paid.");
+
+        Paid = !Paid;
+        PaidAt = Paid ? now : null;
+        PaymentPending = false;
+        ClaimedAt = null;
+    }
+
+    public void RejectClaim()
+    {
+        PaymentPending = false;
+        ClaimedAt = null;
+    }
 }
 
 // ---------- Module 2: Expense Manager ----------
@@ -46,6 +80,14 @@ public class Group
     public List<Member> Members { get; set; } = [];
     public List<Expense> Expenses { get; set; } = [];
     public List<Settlement> Settlements { get; set; } = [];
+
+    public Member FindMember(Guid memberId) =>
+        Members.FirstOrDefault(m => m.Id == memberId)
+        ?? throw new Services.NotFoundException($"Member '{memberId}' not found in this group.");
+
+    public bool HasMemberNamed(string name, Guid? excludeMemberId = null) =>
+        Members.Any(m => (excludeMemberId == null || m.Id != excludeMemberId) &&
+                         string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
 }
 
 public class Member
@@ -59,6 +101,13 @@ public class Member
     /// <summary>When the member was first claimed; null while nobody holds it. Personal tokens live in <see cref="MemberDevice"/>.</summary>
     public DateTime? ClaimedAt { get; set; }
     public bool IsAdmin { get; set; }
+
+    public void Update(string name, string? pixKey, PixKeyType? pixKeyType)
+    {
+        Name = name;
+        PixKey = pixKey;
+        PixKeyType = pixKeyType;
+    }
 }
 
 /// <summary>One personal token per browser/device that holds a member's identity.</summary>
@@ -103,6 +152,36 @@ public class Expense
     public DateTime? UpdatedAt { get; set; }
     public List<ExpenseShare> Shares { get; set; } = [];
     public List<ExpenseConfirmation> Confirmations { get; set; } = [];
+
+    /// <summary>Members who must confirm: everyone sharing the expense except whoever paid it.</summary>
+    public HashSet<Guid> RequiredConfirmers() =>
+        Shares.Select(s => s.MemberId).Where(id => id != PaidByMemberId).ToHashSet();
+
+    /// <summary>The person who adds or edits an expense already agrees with it, if they take part in it.</summary>
+    public List<ExpenseConfirmation> GenerateAutoConfirmations(Guid? actorMemberId, DateTime now) =>
+        actorMemberId is { } me && RequiredConfirmers().Contains(me)
+            ? [new ExpenseConfirmation { Id = Guid.NewGuid(), ExpenseId = Id, MemberId = me, Status = ConfirmationStatus.Confirmed, CreatedAt = now }]
+            : [];
+
+    public ExpenseConfirmation SetConfirmation(Guid memberId, ConfirmationStatus status, string? comment, DateTime now)
+    {
+        var existing = Confirmations.FirstOrDefault(c => c.MemberId == memberId);
+        if (existing is null)
+        {
+            existing = new ExpenseConfirmation
+            {
+                Id = Guid.NewGuid(), ExpenseId = Id, MemberId = memberId, Status = status, Comment = comment, CreatedAt = now,
+            };
+            Confirmations.Add(existing);
+        }
+        else
+        {
+            existing.Status = status;
+            existing.Comment = comment;
+            existing.CreatedAt = now;
+        }
+        return existing;
+    }
 }
 
 public class ExpenseConfirmation
@@ -142,4 +221,13 @@ public class Settlement
     public Guid? CreatedByMemberId { get; set; }
     public SettlementStatus Status { get; set; } = SettlementStatus.Confirmed;
     public DateTime? ConfirmedAt { get; set; }
+
+    public void Confirm(DateTime now)
+    {
+        if (Status != SettlementStatus.Confirmed)
+        {
+            Status = SettlementStatus.Confirmed;
+            ConfirmedAt = now;
+        }
+    }
 }

@@ -5,11 +5,20 @@ using RachaConta.Api.Services;
 namespace RachaConta.Api.Infrastructure;
 
 /// <summary>Maps <see cref="AppException"/>s to RFC 7807 ProblemDetails responses.</summary>
-public sealed class AppExceptionHandler(IProblemDetailsService problemDetails) : IExceptionHandler
+public sealed class AppExceptionHandler(IProblemDetailsService problemDetails, ILogger<AppExceptionHandler> logger) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext http, Exception exception, CancellationToken ct)
     {
-        if (exception is not AppException app) return false;
+        var correlationId = http.Items[CorrelationIdMiddleware.ItemKey] as string
+            ?? (http.Response.Headers.TryGetValue(CorrelationIdMiddleware.HeaderName, out var respHeader) ? respHeader.ToString() : null)
+            ?? (http.Request.Headers.TryGetValue(CorrelationIdMiddleware.HeaderName, out var reqHeader) ? reqHeader.ToString() : null)
+            ?? http.TraceIdentifier;
+
+        if (exception is not AppException app)
+        {
+            logger.LogError(exception, "Unhandled unexpected exception (CorrelationId: {CorrelationId}): {Message}", correlationId, exception.Message);
+            return false;
+        }
 
         ProblemDetails problem = app is ValidationException v
             ? new ValidationProblemDetails(v.Errors.ToDictionary(e => e.Key, e => e.Value)) { Detail = v.Message }
