@@ -73,6 +73,7 @@ builder.Services.AddScoped<DeviceLinkService>();
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.OnRejected = RateLimitRejection.WriteAsync;
     // Link codes are short, so cap guesses per client and group.
     o.AddPolicy("link-redeem", http => RateLimitPartition.GetFixedWindowLimiter(
         $"{http.Connection.RemoteIpAddress}|{http.Request.RouteValues["id"]}",

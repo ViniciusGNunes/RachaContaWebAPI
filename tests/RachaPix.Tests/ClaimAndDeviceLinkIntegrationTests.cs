@@ -148,5 +148,9 @@ public class ClaimAndDeviceLinkIntegrationTests : IClassFixture<RachaPixAppFacto
         // The 6th request should exceed the limit and return 429 Too Many Requests.
         var rateLimitedRes = await client.PostAsJsonAsync($"/api/groups/{group.Id}/link-codes/redeem", new RedeemLinkCodeRequest("CODE6ABC", "Label"));
         Assert.Equal(HttpStatusCode.TooManyRequests, rateLimitedRes.StatusCode);
+        Assert.True(rateLimitedRes.Headers.RetryAfter?.Delta > TimeSpan.Zero, "Retry-After header is missing");
+        var problem = await rateLimitedRes.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal(429, problem?.Status);
+        Assert.False(string.IsNullOrWhiteSpace(problem?.Detail));
     }
 }
