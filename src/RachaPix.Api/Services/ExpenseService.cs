@@ -73,7 +73,7 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock, ExpenseQ
     public async Task<ExpenseDto> ConfirmAsync(Guid groupId, Guid expenseId, ConfirmationRequest req, GroupActor actor, CancellationToken ct)
     {
         var members = await queries.LoadMembersAsync(groupId, ct);
-        var expense = await queries.LoadExpenseAsync(groupId, expenseId, ct, tracking: true);
+        var expense = await queries.LoadExpenseAsync(groupId, expenseId, ct);
 
         if (actor.MemberId is not { } me || !expense.RequiredConfirmers().Contains(me))
             throw new ForbiddenException("Only the people this expense was split with can confirm or contest it.");
@@ -83,11 +83,25 @@ public sealed class ExpenseService(AppDbContext db, TimeProvider clock, ExpenseQ
         errors.ThrowIfAny();
 
         var comment = string.IsNullOrWhiteSpace(req.Comment) ? null : req.Comment.Trim();
-        var confirmation = expense.SetConfirmation(me, req.Status!.Value, comment, clock.GetUtcNow().UtcDateTime);
-        if (!db.ExpenseConfirmations.Local.Contains(confirmation))
-            db.ExpenseConfirmations.Add(confirmation);
+        var now = clock.GetUtcNow().UtcDateTime;
+        var existing = await db.ExpenseConfirmations.FirstOrDefaultAsync(c => c.ExpenseId == expenseId && c.MemberId == me, ct);
+        if (existing is null)
+        {
+            db.ExpenseConfirmations.Add(new ExpenseConfirmation
+            {
+                Id = Guid.NewGuid(), ExpenseId = expenseId, MemberId = me, Status = req.Status!.Value, Comment = comment, CreatedAt = now,
+            });
+        }
+        else
+        {
+            existing.Status = req.Status!.Value;
+            existing.Comment = comment;
+            existing.CreatedAt = now;
+        }
         await db.SaveChangesAsync(ct);
-        return mapper.ToDto(expense, members);
+
+        var refreshed = await queries.LoadExpenseAsync(groupId, expenseId, ct);
+        return mapper.ToDto(refreshed, members);
     }
 
     // ---------- Settlements ----------
